@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Check for input
+if [ -z "$1" ]; then
+    echo "Usage: rmac {MAC Address}"
+    exit 1
+fi
+
+# Normalize MAC format to colon-separated, uppercase
+INPUT=$(echo "$1" | tr '[:lower:]' '[:upper:]' | sed -E 's/[-.:]//g')
+
+# Validate input is 12 hex digits
+if ! [[ "$INPUT" =~ ^[0-9A-F]{12}$ ]]; then
+    echo "Invalid MAC address format"
+    exit 1
+fi
+
+# Convert to colon-separated format
+MAC=$(echo "$INPUT" | sed -E 's/(..)(..)(..)(..)(..)(..)/\1:\2:\3:\4:\5:\6/')
+
+# Extract the first byte
+FIRST_BYTE_HEX=$(echo "$MAC" | cut -d ':' -f1)
+
+# Validate format (must have 6 parts of 2 hex digits)
+if ! [[ "$MAC" =~ ^([0-9A-F]{2}:){5}[0-9A-F]{2}$ ]]; then
+    echo "Invalid MAC address format"
+    exit 1
+fi
+
+# Convert first byte to decimal
+DECIMAL=$((16#$FIRST_BYTE_HEX))
+
+# Convert to binary (8-bit, padded)
+BINARY=$(printf "%08d" "$(echo "obase=2; $DECIMAL" | bc)")
+
+# Extract bit 1 (second least significant bit — bit 1, index 6 from left)
+BIT1=$(echo "$BINARY" | cut -c7)
+
+# Insert brackets around bit 1 (char 7)
+BINARY_FORMATTED="$(echo "$BINARY" | sed "s/^\(......\)\(.\)\(.\)$/\1[\2]\3/")"
+
+# Generate MAC format variants
+COLON_UPPER="$MAC"
+DASH_UPPER=$(echo "$MAC" | sed 's/:/-/g')
+DOT_UPPER=$(echo "$MAC" | sed 's/://g' | sed -E 's/(.{4})(.{4})(.{4})/\1.\2.\3/')
+PLAIN_LOWER=$(echo "$MAC" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+echo 
+# Display diagnostic info
+echo "Check MAC Randomization Bit"
+echo "Normalized MAC: $MAC"
+echo "First Byte (Hex): $FIRST_BYTE_HEX"
+echo "First Byte (Bin): $BINARY_FORMATTED"
+echo "Bit 1 (Locally Administered Flag): $BIT1"
+# Determine result
+if [ "$BIT1" -eq 1 ]; then
+    echo "This is likely a RANDOMIZED/PRIVATE (locally administered) MAC address."
+else
+    echo "This is likely a FACTORY (universally administered) MAC address."
+fi
+echo
+echo "Alternate MAC Formats:"
+echo "Colon-separated (uppercase):     $COLON_UPPER"
+echo "Dash-separated (uppercase):      $DASH_UPPER"
+echo "Dot-separated (Cisco-style):     $DOT_UPPER"
+echo "Plain lowercase (no delimiters): $PLAIN_LOWER"
+echo
+echo "Splunk Filter"
+echo "($PLAIN_LOWER OR $DOT_UPPER OR $DASH_UPPER OR $COLON_UPPER)"
+echo "WIFI: index=routing $DOT_UPPER"
+echo "DNS: index=ipam $COLON_UPPER"
+echo "aaa: index=aaa ($PLAIN_LOWER OR $DASH_UPPER)"
+echo
